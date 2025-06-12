@@ -1,0 +1,127 @@
+{
+  "name": "LinkedIn Hunter Workflow",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "linkedin-hunter-search",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "single"
+        }
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "const company = $node['Webhook Trigger'].parameter.company || $json.company;\nconst role = $node['Webhook Trigger'].parameter.role || $json.role;\nitems[0].json.searchQuery = 'site:linkedin.com/in AND ' + company + ' AND \"' + role + '\"';\nitems[0].json.company = company;\nitems[0].json.role = role;\nreturn items;"
+      },
+      "name": "Build LinkedIn Search Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "options": {},
+        "queryParametersUi": {
+          "parameter": [
+            { "name": "q", "value": "={{$json.searchQuery}}" },
+            { "name": "engine", "value": "google" },
+            { "name": "api_key", "value": "={{$credentials.serpapiApiKey.apiKey}}" }
+          ]
+        }
+      },
+      "name": "SerpAPI Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "const results = $json.organic_results || [];\nreturn results.map(r => ({ json: { profileUrl: r.link, title: r.title, company: $json.company, role: $json.role } }));"
+      },
+      "name": "Extract LinkedIn URLs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": { "batchSize": 5 },
+      "name": "SplitBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{$json.title}}", "operation": "contains", "value2": "Founder" },
+            { "value1": "={{$json.title}}", "operation": "contains", "value2": "Director" },
+            { "value1": "={{$json.title}}", "operation": "contains", "value2": "Talent Acquisition" }
+          ]
+        }
+      },
+      "name": "Filter by Title",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hunter.io/v2/email-finder",
+        "options": {},
+        "queryParametersUi": {
+          "parameter": [
+            { "name": "domain", "value": "={{$node['Build LinkedIn Search Query'].json.company.toLowerCase().replace(/\s/g, '') + '.com'}}" },
+            { "name": "full_name", "value": "={{$json.title.split(' at ')[0] || ''}}" },
+            { "name": "api_key", "value": "={{$credentials.hunterApiKey.apiKey}}" }
+          ]
+        }
+      },
+      "name": "Hunter Email Finder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "sheetId": "YOUR_SHEET_ID_HERE",
+        "range": "Sheet1",
+        "valueInputMode": "RAW",
+        "options": {},
+        "fields": {
+          "values": [[
+            "={{$json.company}}",
+            "={{$json.role}}",
+            "={{$json.full_name || ''}}",
+            "={{$json.profileUrl}}",
+            "={{$json.data.email}}",
+            "={{$json.data.score}}"
+          ]]
+        }
+      },
+      "name": "Append to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [1650, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Build LinkedIn Search Query", "type": "main", "index": 0 }]] },
+    "Build LinkedIn Search Query": { "main": [[{ "node": "SerpAPI Request", "type": "main", "index": 0 }]] },
+    "SerpAPI Request": { "main": [[{ "node": "Extract LinkedIn URLs", "type": "main", "index": 0 }]] },
+    "Extract LinkedIn URLs": { "main": [[{ "node": "SplitBatches", "type": "main", "index": 0 }]] },
+    "SplitBatches": { "main": [[{ "node": "Filter by Title", "type": "main", "index": 0 }]] },
+    "Filter by Title": { "main": [[{ "node": "Hunter Email Finder", "type": "main", "index": 0 }]] },
+    "Hunter Email Finder": { "main": [[{ "node": "Append to Google Sheet", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}
